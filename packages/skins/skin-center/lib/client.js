@@ -1012,7 +1012,7 @@ window.__ModuleLoader__.load({
 			}, "ui-skin-center: body scope");
 			const theme = ctx.get("theme");
 			const controller = new TryOnController();
-			const background = new BackgroundController(ctx.settingsScope.bind({ namespace: SKIN_BACKGROUND_NS }));
+			const background = new BackgroundController((ctx.get("webUiSettings") ?? ctx.settingsScope).bind({ namespace: SKIN_BACKGROUND_NS }));
 			const injected = () => ({
 				controller,
 				theme: {
