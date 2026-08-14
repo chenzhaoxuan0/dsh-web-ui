@@ -53,6 +53,8 @@ export const SKIN_CENTER_ENTRIES: readonly SkinCenterEntry[] = [
 
   {"id":"trading","name":"交易终端","nameEn":"Trading Terminal","author":"dsh-web-ui","tagline":"实时行情跑马灯 · 长桥港美股行情 · 红涨绿跌交易终端","description":"结合 dsh-fun-ticker 行情跑马灯与 dsh-longbridge 港美股行情的炒股皮肤：顶栏滚动 A股/港股/美股/指数/加密/外汇报价（装 fun-ticker 后跟随你的自选列表），状态栏展示长桥行情快照与 A股/港股/美股交易时段，写代码也像盯盘。","tags":["stock","trading","ticker","live","terminal","longbridge"],"accent":"#f23645","bodyAttr":"data-dsh-trading","package":"@linxin666/dsh-client-ui-skin-trading","order":8},
 
+  {"id":"twilight-mirror","name":"暮色镜湖","nameEn":"Twilight Mirror","author":"dsh-web-ui（参考 preset-twilight-mirror 主题）","tagline":"蓝紫暮光与静水倒影 · 薰衣草紫调色板 · 半透明面板","description":"《暮色镜湖》— 在蓝紫暮光与静水倒影之间保持专注：暮色镜湖背景画（蓝紫暮光天幕、静水倒影、远景群山）垫在半透明面板之下，遮罩随亮/暗主题实时切换，深海军蓝表面搭配薰衣草粉紫强调色（accent #d89be8）与雾蓝点缀（#79b9f4）重映射到全部 dsh token，暗色变体为深海夜航调。","tags":["twilight","mirror","lavender","navy","art","translucent"],"accent":"#d89be8","bodyAttr":"data-dsh-twilight-mirror","package":"@linxin666/dsh-client-ui-skin-twilight-mirror","order":8},
+
   {"id":"miku","name":"初音未来 · 电子歌姬","nameEn":"Hatsune Miku","author":"涂山苏苏","tagline":"蓝紫双马尾 · 01 编号 · 音符波形 · 电子歌姬主题","description":"以世界第一的虚拟歌姬初音未来为灵感的主题皮肤：蓝紫洋红渐变贯穿全局，音符与声波曲线点缀在半透明面板之间，标题栏与状态栏带有 01 编号徽标与音乐波形，半透明毛玻璃面板透出背景图——沉浸式电子歌姬氛围。","tags":["miku","vocaloid","blue","music","idol","waveform"],"accent":"#2e9bff","bodyAttr":"data-dsh-miku","package":"@linxin666/dsh-client-ui-skin-miku","order":9},
 
 ]

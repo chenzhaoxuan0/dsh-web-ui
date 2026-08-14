@@ -1,0 +1,28 @@
+{
+  "id": "twilight-mirror",
+  "name": "暮色镜湖",
+  "nameEn": "Twilight Mirror",
+  "author": "dsh-web-ui（参考 preset-twilight-mirror 主题）",
+  "tagline": "蓝紫暮光与静水倒影 · 薰衣草紫调色板 · 半透明面板",
+  "description": "《暮色镜湖》— 在蓝紫暮光与静水倒影之间保持专注：暮色镜湖背景画（蓝紫暮光天幕、静水倒影、远景群山）垫在半透明面板之下，遮罩随亮/暗主题实时切换，深海军蓝表面搭配薰衣草粉紫强调色（accent #d89be8）与雾蓝点缀（#79b9f4）重映射到全部 dsh token，暗色变体为深海夜航调。",
+  "tags": [
+    "twilight",
+    "mirror",
+    "lavender",
+    "navy",
+    "art",
+    "translucent"
+  ],
+  "accent": "#d89be8",
+  "bodyAttr": "data-dsh-twilight-mirror",
+  "package": "@linxin666/dsh-client-ui-skin-twilight-mirror",
+  "wiring": {
+    "id": "ui-skin-twilight-mirror",
+    "bundleWired": false
+  },
+  "preview": {
+    "light": "packages/skins/twilight-mirror/preview/light.png",
+    "dark": "packages/skins/twilight-mirror/preview/dark.png"
+  },
+  "order": 8
+}
