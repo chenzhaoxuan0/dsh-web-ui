@@ -28,12 +28,13 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
-const HOME = process.env.HOME
+const HOME = process.env.HOME || process.env.USERPROFILE
 const PATCH = `${HOME}/.dsh/cordis.patch.yml`
 const PROFILE_MODULES = `${HOME}/.dsh/profiles/node_modules`
 /** The GUI profile this machine runs (dsh web); overridable via DSH_SKIN_PROFILE. */
 const DEFAULT_PROFILE = process.env.DSH_SKIN_PROFILE || 'web'
-const REPO = `${HOME}/code/dsh-web-ui`
+/** Repo root: detected from this script's own location (scripts/..), so any checkout path works. */
+const REPO = path.resolve(__dirname, '..')
 
 /** Skin registry: name -> package, cordis row id, symlink resolve target (all repo dirs). */
 const SKINS = {
@@ -44,6 +45,7 @@ const SKINS = {
   'dragon-heir': { pkg: '@linxin666/dsh-client-ui-skin-dragon-heir', id: 'ui-skin-dragon-heir', dir: `${REPO}/packages/skins/dragon-heir` },
   minecraft: { pkg: '@linxin666/dsh-client-ui-skin-minecraft', id: 'ui-skin-minecraft', dir: `${REPO}/packages/skins/minecraft` },
   'whale-song': { pkg: '@linxin666/dsh-client-ui-skin-whale-song', id: 'ui-skin-whale-song', dir: `${REPO}/packages/skins/whale-song` },
+  'twilight-mirror': { pkg: '@linxin666/dsh-client-ui-skin-twilight-mirror', id: 'ui-skin-twilight-mirror', dir: `${REPO}/packages/skins/twilight-mirror` },
 }
 /** Skin wired at the bundle layer already (no insert row needed here). */
 const BUNDLE_WIRED = new Set(['xp'])
@@ -184,7 +186,10 @@ function ensureSymlink(name) {
   // The link's parent scoped dir may not exist on a fresh machine (the
   // profiles/node_modules/@deepseek-ai tree is created incrementally).
   fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.symlinkSync(dir, target)
+  // 'junction' on Windows needs no admin/developer-mode privilege (a plain
+  // directory symlink would); Node reports junctions as symlinks for
+  // isSymbolicLink()/readlinkSync(), so the rest of the script is unchanged.
+  fs.symlinkSync(dir, target, 'junction')
   return true
 }
 
