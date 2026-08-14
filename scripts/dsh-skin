@@ -20,21 +20,23 @@
  * Switch = rewrite the managed patch section → HMR re-scans → refresh the
  * page. Only ONE skin row is ever enabled: every non-active skin gets an
  * id-target `disabled: true` row (which also neutralizes skins wired at
- * the bundle layer, e.g. ui-skin-xp), and the active skin gets its insert
- * row (xp needs none — the bundle layer already carries it).
+ * the bundle layer), and the active skin gets its insert row.
  */
 
 const fs = require('node:fs')
 const path = require('node:path')
+const os = require('node:os')
 const { execFileSync } = require('node:child_process')
 
-const HOME = process.env.HOME || process.env.USERPROFILE
-const PATCH = `${HOME}/.dsh/cordis.patch.yml`
-const PROFILE_MODULES = `${HOME}/.dsh/profiles/node_modules`
+/** Harness home: `$DSH_HOME` (set by the dsh launcher), else `~/.dsh`. */
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+const PATCH = path.join(DSH_HOME, 'cordis.patch.yml')
+const PROFILE_MODULES = path.join(DSH_HOME, 'profiles', 'node_modules')
 /** The GUI profile this machine runs (dsh web); overridable via DSH_SKIN_PROFILE. */
 const DEFAULT_PROFILE = process.env.DSH_SKIN_PROFILE || 'web'
-/** Repo root: detected from this script's own location (scripts/..), so any checkout path works. */
-const REPO = path.resolve(__dirname, '..')
+/** The dsh-web-ui checkout. Derived from this script's own location so any
+ * clone path works; overridable via DSH_SKIN_REPO. */
+const REPO = process.env.DSH_SKIN_REPO || path.resolve(__dirname, '..')
 
 /** Skin registry: name -> package, cordis row id, symlink resolve target (all repo dirs). */
 const SKINS = {
@@ -46,13 +48,15 @@ const SKINS = {
   minecraft: { pkg: '@linxin666/dsh-client-ui-skin-minecraft', id: 'ui-skin-minecraft', dir: `${REPO}/packages/skins/minecraft` },
   'whale-song': { pkg: '@linxin666/dsh-client-ui-skin-whale-song', id: 'ui-skin-whale-song', dir: `${REPO}/packages/skins/whale-song` },
   'twilight-mirror': { pkg: '@linxin666/dsh-client-ui-skin-twilight-mirror', id: 'ui-skin-twilight-mirror', dir: `${REPO}/packages/skins/twilight-mirror` },
+  trading: { pkg: '@linxin666/dsh-client-ui-skin-trading', id: 'ui-skin-trading', dir: `${REPO}/packages/skins/trading` },
+  miku: { pkg: '@linxin666/dsh-client-ui-skin-miku', id: 'ui-skin-miku', dir: `${REPO}/packages/skins/miku` },
 }
-/** Skin wired at the bundle layer already (no insert row needed here). */
-const BUNDLE_WIRED = new Set(['xp'])
+/** Skins wired at the bundle layer already (no insert row needed here). Empty in the npm aggregate layout — no skin ships pre-wired; profile-installed skins are detected dynamically via bundleWiredFromProfile(). */
+const BUNDLE_WIRED = new Set()
 
-/** The profile manifest path (`~/.dsh/profiles/<profile>/package.json`). */
+/** The profile manifest path (`$DSH_HOME/profiles/<profile>/package.json`). */
 function profileManifestPath() {
-  return `${HOME}/.dsh/profiles/${DEFAULT_PROFILE}/package.json`
+  return path.join(DSH_HOME, 'profiles', DEFAULT_PROFILE, 'package.json')
 }
 
 /**
@@ -186,10 +190,7 @@ function ensureSymlink(name) {
   // The link's parent scoped dir may not exist on a fresh machine (the
   // profiles/node_modules/@deepseek-ai tree is created incrementally).
   fs.mkdirSync(path.dirname(target), { recursive: true })
-  // 'junction' on Windows needs no admin/developer-mode privilege (a plain
-  // directory symlink would); Node reports junctions as symlinks for
-  // isSymbolicLink()/readlinkSync(), so the rest of the script is unchanged.
-  fs.symlinkSync(dir, target, 'junction')
+  fs.symlinkSync(dir, target)
   return true
 }
 
@@ -279,3 +280,4 @@ if (require.main === module) {
       process.exit(cmd ? 1 : 0)
   }
 }
+

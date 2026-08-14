@@ -12,7 +12,7 @@ import { join, relative } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { GitBatchResult, GitChangeRow, GitFileState, GitStatusView, PanelError } from '../core/types.ts'
 import { isPathInside, type WorkspaceGate } from './gate.ts'
 
@@ -45,11 +45,35 @@ export function subprocessRunner(ctx: Context): GitRunner {
         },
         graceMs: 10_000,
       }
-      const handle = ctx.subprocess.spawn(spec)
-      const outcome = await handle.done
-      const stdout = handle.collected.stdout?.readFrom(0).text ?? ''
-      const stderr = handle.collected.stderr?.readFrom(0).text ?? ''
-      return { exitCode: outcome.exitCode, stdout, stderr }
+      // A missing git binary (or a subprocess service that cannot spawn) must
+      // degrade to a failed run, not throw through the route layer: the SCM
+      // tab then shows the friendly "not a git repository" state instead of a
+      // bare 400 with no body. Real failures still log and are written into
+      // stderr so a misclassified failure stays diagnosable.
+      let handle: SubprocessHandle
+      try {
+        handle = ctx.subprocess.spawn(spec)
+      } catch (error) {
+        console.error('[dsh-aionui-panel] git spawn failed:', error)
+        return {
+          exitCode: 127,
+          stdout: '',
+          stderr: 'git: spawn failed: ' + (error instanceof Error ? error.message : String(error)),
+        }
+      }
+      try {
+        const outcome = await handle.done
+        const stdout = handle.collected.stdout?.readFrom(0).text ?? ''
+        const stderr = handle.collected.stderr?.readFrom(0).text ?? ''
+        return { exitCode: outcome.exitCode, stdout, stderr }
+      } catch (error) {
+        console.error('[dsh-aionui-panel] git run failed:', error)
+        return {
+          exitCode: 127,
+          stdout: '',
+          stderr: 'git: run failed: ' + (error instanceof Error ? error.message : String(error)),
+        }
+      }
     },
   }
 }
@@ -139,6 +163,26 @@ export class GitService {
     private readonly fsDelete: (root: string, rel: string) => Promise<{ ok: true } | PanelError>,
   ) {}
 
+  /** Cached one-shot git binary probe; never re-probes after the first call. */
+  private availablePromise: Promise<boolean> | undefined
+
+  /**
+   * Probe the git binary once (git --version) and cache the verdict for the
+   * service lifetime. A machine without git then degrades every operation to
+   * the stable "not a git repository" state after a single failed spawn,
+   * instead of re-spawning ENOENT on every poll tick. The cache stays false
+   * even if git is installed later; the host restart picks it up.
+   */
+  gitAvailable(): Promise<boolean> {
+    if (this.availablePromise === undefined) {
+      this.availablePromise = this.runner
+        .run(['--version'], '/')
+        .then((result) => result.exitCode === 0)
+        .catch(() => false)
+    }
+    return this.availablePromise
+  }
+
   /** Resolve the gated canonical root and the repository top-level. */
   private async repo(root: string): Promise<{ ok: true; root: string; repo: string } | { ok: false; error: PanelError }> {
     const gated = await this.gate(root)
@@ -157,6 +201,9 @@ export class GitService {
 
   /** The repo status view; null when the root is not a repository. */
   async status(root: string): Promise<GitStatusView | null | PanelError> {
+    // A missing git binary answers before any spawn: the probe runs once per
+    // service lifetime, so a git-less machine never re-spawns ENOENT here.
+    if (!(await this.gitAvailable())) return null
     const repo = await this.repo(root)
     if (!repo.ok) return repo.error.code === 'git-unavailable' ? null : repo.error
     const [branchResult, statusResult] = await Promise.all([

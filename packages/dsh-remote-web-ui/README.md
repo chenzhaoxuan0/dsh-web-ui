@@ -1,13 +1,16 @@
 # DSH Remote Web UI
 
-> 移动端远程控制：扫码配对后，用手机远程使用当前 dsh web 工作区。
+> 移动端远程控制 + 一键远程更新：扫码配对后用手机远程使用当前 dsh web 工作区；
+> 点击侧边栏更新按钮自动检查并更新 dsh-web-ui 全家桶。
 
 This repository is an external plugin package for DeepSeek Harness (DSH):
-scan-to-pair mobile remote control for the dsh web GUI. It is a single
-dual-face package — the host half owns pairing tokens, device sessions, and
-the `/api/pair` route family; the browser half renders the sidebar-foot
-entry (phone icon beside the settings button) and the pairing panel with a
-QR code, live device status, and stop/refresh/copy actions.
+scan-to-pair mobile remote control for the dsh web GUI, plus a one-click
+self-update for the dsh-web-ui family. It is a single dual-face package — the
+host half owns pairing tokens, device sessions, the `/api/pair` route family,
+and the `/api/update` surface; the browser half renders the sidebar-foot
+entries (the download trigger and the phone icon beside the settings button),
+the pairing panel with a QR code, live device status, and stop/refresh/copy
+actions, and the update panel that probes and runs the update.
 
 ## What it does
 
@@ -30,6 +33,14 @@ QR code, live device status, and stop/refresh/copy actions.
   device cookie, so the QR is the only way into a LAN-exposed dsh web.
 - **Live status**: the desktop panel mirrors the pairing state in real time
   (waiting → connected → disconnected) over an SSE stream.
+- **Remote update**: the download trigger in the sidebar foot (left of the
+  phone icon) opens the update panel, which probes the npm registry for the
+  installed `@linxin666/dsh-*` family releases. When a newer release exists
+  the panel runs the update automatically (`pnpm update` inside the owning
+  dsh profile; the loopback-only `/api/update/status` + `/api/update/run`
+  endpoints drive it) and asks for a dsh web restart to pick it up. Local
+  link installs (development mode) are detected and report the npm state
+  without updating.
 
 ## Screenshots
 
@@ -230,10 +241,19 @@ Notes:
 - Quick tunnels are free and need no login, but the hostname is random per
   run: every `cloudflared` restart changes it, so update `--trusted-host`
   and `publicBaseUrl` together. Cloudflare documents no uptime guarantees;
-  in-flight-request concurrency is capped (HTTP 429 past it), and Quick
-  Tunnels do not support Server-Sent Events — harmless here, because the
-  only SSE surface (the desktop panel status stream) is loopback-only and
-  the phone side uses plain requests plus heartbeats.
+  in-flight-request concurrency is capped (HTTP 429 past it), and **Quick
+  Tunnels do not forward Server-Sent Events**. `Tailscale Serve` (and
+  `tailscale serve` on a single port) behaves the same way. SSE is how the
+  phone receives **live messages** in real time, so over a quick tunnel or
+  Tailscale Serve the mobile chat falls back to polling: the phone still
+  sends and receives messages (everything else rides plain HTTP, which does
+  forward), only a new message may arrive a few seconds late instead of
+  instantly. The plugin polls `session.history` on a short interval once the
+  SSE channel goes silent, and resumes streaming as soon as SSE works again.
+  For true real-time push, point the QR at a tunnel that forwards SSE — a
+  Cloudflare **named tunnel** (domain hosted on Cloudflare, see below), or a
+  plain TCP port forward (LAN address, the `tailscale up` virtual-interface
+  address, or a manual `ssh -L` / cloudflared TCP tunnel to the port).
 - A quick tunnel is public: anyone with the URL can load the static page.
   The pairing gate is the real fence — unpaired devices get 403 on every
   `/api` call — so keep `requirePairingForLan` on.
