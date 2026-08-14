@@ -51,4 +51,6 @@ export const SKIN_CENTER_ENTRIES: readonly SkinCenterEntry[] = [
 
   {"id":"whale-song","name":"鲸吟","nameEn":"Whale Song","author":"dsh-web-ui","tagline":"深海鲸语女神背景 · 冰蓝海洋调色板 · 金色细线点缀","description":"《鲸吟》— 深海鲸语女神主题：无文字纯氛围背景画（蓝发女神与鲸群居左、冰蓝星座网格与金线点缀、右侧大量留白）垫在半透明面板之下，遮罩随亮/暗主题实时切换，冰蓝/浅青/深海军蓝/钴蓝冷色体系重映射到全部 dsh token，暗色变体为深海夜航调。","tags":["whale","ocean","ice-blue","goddess","art","translucent"],"accent":"#4d8fd4","bodyAttr":"data-dsh-whale-song","package":"@linxin666/dsh-client-ui-skin-whale-song","order":7},
 
+  {"id":"twilight-mirror","name":"暮色镜湖","nameEn":"Twilight Mirror","author":"dsh-web-ui（参考 preset-twilight-mirror 主题）","tagline":"蓝紫暮光与静水倒影 · 薰衣草紫调色板 · 半透明面板","description":"《暮色镜湖》— 在蓝紫暮光与静水倒影之间保持专注：暮色镜湖背景画（蓝紫暮光天幕、静水倒影、远景群山）垫在半透明面板之下，遮罩随亮/暗主题实时切换，深海军蓝表面搭配薰衣草粉紫强调色（accent #d89be8）与雾蓝点缀（#79b9f4）重映射到全部 dsh token，暗色变体为深海夜航调。","tags":["twilight","mirror","lavender","navy","art","translucent"],"accent":"#d89be8","bodyAttr":"data-dsh-twilight-mirror","package":"@linxin666/dsh-client-ui-skin-twilight-mirror","order":8},
+
 ]
