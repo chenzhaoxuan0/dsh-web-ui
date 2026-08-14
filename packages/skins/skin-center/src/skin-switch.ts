@@ -113,7 +113,7 @@ export interface SkinSwitchEntry {
  */
 function readSkinMeta(absDir: string): { id: string; package: string; wiring: { id: string; bundleWired: boolean } } | null {
   try {
-    const meta: unknown = JSON.parse(readFileSync(joinPath(absDir, 'skin.json'), 'utf8'))
+    const meta: unknown = JSON.parse(readFileSync(joinPath(absDir, 'skin.json'), 'utf8').replace(/^\uFEFF/, ''))
     if (typeof meta !== 'object' || meta === null) return null
     const record = meta as Record<string, unknown>
     if (typeof record.id !== 'string' || !/^[a-z0-9-]+$/.test(record.id)) return null
@@ -240,19 +240,56 @@ export function loadRegistry(skinsDir: string = SKINS_DIR): Record<string, SkinS
 }
 
 /**
- * The skins the bundle layer already wires (no insert row needed) — derived
- * from each skin.json wiring.bundleWired (the repo's static truth).
+/**
+ * Skins whose insert row the profile bundle layer already provides — read
+ * from the active profile manifest's `dsh.profile.bundles` (the same source
+ * the CLI's bundleWiredFromProfile() uses). A skin installed as a bundle
+ * ships its own cordis.patch.yml insert, so dsh-skin must not write a second
+ * row: a duplicate loader entry id fails the boot.
  *
- * TODO: the CLI also detects skins wired via the active profile's
- * dsh.profile.bundles (bundleWiredFromProfile). A skin installed from the
- * web profile's manifest is still represented by skin.json's flag in this
- * repo; wire further profile-based detection here if ever needed.
- * @param registry - the derived registry (or a partial override in tests).
+ * Read with UTF-8 BOM tolerance: some tools write the manifest with a BOM,
+ * which breaks strict JSON.parse and would silently fall back to "not wired"
+ * — exactly how a duplicate insert row got generated before (the BOM
+ * duplicate-entry incident). Any read/parse problem still degrades to empty
+ * (callers decide whether to fail loud via assertNoDuplicateInsert).
+ * @param paths - resolved DSH home + profile paths.
+ * @param registry - the derived registry (maps pkg -> skin name).
+ * @returns the set of skin names wired by the profile bundle layer.
  */
-export function wiredNames(registry: Record<string, SkinSwitchEntry>): Set<string> {
+function profileBundleWired(paths: SkinSwitchPaths, registry: Record<string, SkinSwitchEntry>): Set<string> {
+  const manifestPath = joinPath(dirname(paths.profileModulesDir), 'package.json')
+  try {
+    const raw = readFileSync(manifestPath, 'utf8')
+    const manifest: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''))
+    const bundles = (manifest as { dsh?: { profile?: { bundles?: unknown } } })?.dsh?.profile?.bundles
+    if (!Array.isArray(bundles)) return new Set()
+    return new Set(
+      Object.entries(registry)
+        .filter(([, skin]) => bundles.includes(skin.pkg))
+        .map(([name]) => name),
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * The skins the bundle layer already wires (no insert row needed): each
+ * skin.json wiring.bundleWired flag, plus — when paths are known — the skins
+ * the active profile manifest bundles (profileBundleWired). The flag alone is
+ * the repo's static truth and does not reflect profile-level installs, which
+ * is why the profile read is added at the call sites that have real paths.
+ * @param registry - the derived registry (or a partial override in tests).
+ * @param paths - resolved DSH paths; when omitted only skin.json flags count
+ *   (deterministic for pure-function tests).
+ */
+export function wiredNames(registry: Record<string, SkinSwitchEntry>, paths?: SkinSwitchPaths): Set<string> {
   const out = new Set<string>()
   for (const [name, skin] of Object.entries(registry)) {
     if (skin.bundleWired) out.add(name)
+  }
+  if (paths !== undefined) {
+    for (const name of profileBundleWired(paths, registry)) out.add(name)
   }
   return out
 }
@@ -293,8 +330,8 @@ export function stripManaged(patch: string): string {
  * @param active - skin id, or null for the official stock look.
  * @param registry - registry to render against (defaults to the repo registry).
  */
-export function renderManaged(active: string | null, registry: Record<string, SkinSwitchEntry> = loadRegistry()): string {
-  const wired = wiredNames(registry)
+export function renderManaged(active: string | null, registry: Record<string, SkinSwitchEntry> = loadRegistry(), paths?: SkinSwitchPaths): string {
+  const wired = wiredNames(registry, paths)
   const lines = [MANAGED_START]
   for (const name of Object.keys(registry)) {
     if (name === active) continue
@@ -315,12 +352,12 @@ export function renderManaged(active: string | null, registry: Record<string, Sk
  * @param patch - raw patch file text.
  * @param registry - registry to read against (defaults to the repo registry).
  */
-export function currentActive(patch: string, registry: Record<string, SkinSwitchEntry> = loadRegistry()): string | null {
+export function currentActive(patch: string, registry: Record<string, SkinSwitchEntry> = loadRegistry(), paths?: SkinSwitchPaths): string | null {
   const disabled = new Set<string>()
   for (const m of patch.matchAll(/^- id: (ui-skin-[a-z0-9-]+)\n  disabled: true/gm)) {
     disabled.add(m[1])
   }
-  const wired = wiredNames(registry)
+  const wired = wiredNames(registry, paths)
   for (const [name, skin] of Object.entries(registry)) {
     if (wired.has(name) && !disabled.has(skin.id)) return name
   }
@@ -463,7 +500,7 @@ function ensureSymlink(entry: SkinSwitchEntry, profileModulesDir: string): boole
  */
 function isSkinPackageDir(dir: string, entry: SkinSwitchEntry): boolean {
   try {
-    const meta: unknown = JSON.parse(readFileSync(joinPath(dir, 'skin.json'), 'utf8'))
+    const meta: unknown = JSON.parse(readFileSync(joinPath(dir, 'skin.json'), 'utf8').replace(/^\uFEFF/, ''))
     if (typeof meta !== 'object' || meta === null) return false
     const record = meta as Record<string, unknown>
     return record.id === entry.id.replace(/^ui-skin-/, '') && record.package === entry.pkg
@@ -540,6 +577,28 @@ function checkResolvable(entry: SkinSwitchEntry, profileModulesDir: string): str
 }
 
 /**
+ * Fail-loud duplicate guard: when the profile bundle layer already provides
+ * this skin's insert row (the bundle's own cordis.patch.yml installed under
+ * the profile node_modules), the managed section must not insert the same id
+ * again — the boot dies with `duplicate loader entry id`. The bundle patch is
+ * inspected directly, so the guard holds even when manifest-based wiring
+ * detection misreads (e.g. a UTF-8 BOM breaks bundleWiredFromProfile, the
+ * duplicate-entry incident). Throws instead of writing a boot-breaking patch.
+ * @param name - the skin being switched to.
+ * @param entry - its switch entry.
+ * @param paths - resolved DSH paths.
+ */
+function assertNoDuplicateInsert(name: string, entry: SkinSwitchEntry, paths: SkinSwitchPaths): void {
+  const bundlePatch = joinPath(paths.profileModulesDir, entry.pkg, 'cordis.patch.yml')
+  let text = ''
+  try { text = readFileSync(bundlePatch, 'utf8') } catch { return }
+  if (!text.includes('- insert:') || !text.includes(`- id: ${entry.id}`)) return
+  throw new Error(
+    `${name} 已由 profile bundle 提供（${entry.pkg}/cordis.patch.yml 含 id ${entry.id}），managed 区不得再插入该 id，否则启动报 duplicate loader entry id。若本皮肤应作为普通皮肤使用，请先从 profile 的 dsh.profile.bundles 移除；若 profile manifest 带 UTF-8 BOM 导致误判，请去除 BOM 后重试。`,
+  )
+}
+
+/**
  * Switch the active skin. Equivalent to `dsh-skin use <name>`:
  *   1. makes the profile node_modules symlink for a non-official skin,
  *   2. rewrites the managed section of the boot patch atomically.
@@ -564,10 +623,14 @@ export function useSkin(name: string, opts: { home?: string; profile?: string; r
     // what checkResolvable answers. Throw so /apply turns it into ok:false.
     const problem = checkResolvable(entry, paths.profileModulesDir)
     if (problem !== null) throw new Error(problem)
+    // Duplicate-entry guard: only relevant when wiring detection says the
+    // skin is NOT bundle-wired — in that case an insert row is about to be
+    // written, so verify the bundle patch really does not provide the id.
+    if (!wiredNames(registry, paths).has(name)) assertNoDuplicateInsert(name, entry, paths)
   }
 
   const patch = stripLegacySkinRows(stripManaged(readPatch(paths.patchPath)))
-  const next = `${patch.replace(/\s+$/, '')}\n\n${renderManaged(official ? null : name, registry)}\n`
+  const next = `${patch.replace(/\s+$/, '')}\n\n${renderManaged(official ? null : name, registry, paths)}\n`
   writePatchAtomic(paths.patchPath, next)
 
   const core = official
@@ -587,5 +650,5 @@ export function useSkin(name: string, opts: { home?: string; profile?: string; r
 export function currentSkin(patch: string | undefined, opts: { home?: string; profile?: string; registry?: Record<string, SkinSwitchEntry> } = {}): string {
   const paths = resolvePaths(opts.home, opts.profile)
   const registry = opts.registry ?? loadRegistry()
-  return currentActive(patch ?? readPatch(paths.patchPath), registry) ?? 'none'
+  return currentActive(patch ?? readPatch(paths.patchPath), registry, paths) ?? 'none'
 }

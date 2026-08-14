@@ -102,6 +102,24 @@ describe('skin registry derivation (from skin.json wiring)', () => {
     expect(registry.xp.bundleWired).toBe(false)
     expect(wiredNames(registry).has('xp')).toBe(false)
   })
+
+  it('loadRegistry tolerates a UTF-8 BOM in skin.json', () => {
+    const fakeRoot = mkdtempSync(join(tmpdir(), 'skin-bom-'))
+    try {
+      const scoped = join(fakeRoot, '@linxin666')
+      mkdirSync(join(scoped, 'dsh-client-ui-skin-qq98'), { recursive: true })
+      writeFileSync(join(scoped, 'dsh-client-ui-skin-qq98', 'skin.json'), '\uFEFF' + JSON.stringify({
+        id: 'qq98',
+        package: '@linxin666/dsh-client-ui-skin-qq98',
+        wiring: { id: 'ui-skin-qq98' },
+      }))
+      const registry = loadRegistry(scoped)
+      expect(registry.qq98).toBeDefined()
+      expect(registry.qq98.pkg).toBe('@linxin666/dsh-client-ui-skin-qq98')
+    } finally {
+      rmSync(fakeRoot, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('pure patch helpers', () => {
@@ -155,6 +173,24 @@ describe('pure patch helpers', () => {
   it('currentActive returns the active skin from an insert row', () => {
     const registry = miniRegistry()
     expect(currentActive(renderManaged('qq98', registry), registry)).toBe('qq98')
+  })
+
+  it('renderManaged omits the insert row for a profile-bundle-wired skin (BOM-tolerant manifest read)', () => {
+    const h = fakeHome()
+    const profileDir = join(h, '.dsh', 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    const registry = miniRegistry()
+    const qq98 = registry.qq98
+    // The profile manifest carries a UTF-8 BOM (as emitted by some tools) and
+    // bundles the skin package: the managed section must not re-insert it.
+    writeFileSync(join(profileDir, 'package.json'), '\uFEFF' + JSON.stringify({
+      dsh: { profile: { bundles: [qq98.pkg] } },
+    }))
+    const paths = resolvePaths(h)
+    expect(wiredNames(registry, paths).has('qq98')).toBe(true)
+    expect(renderManaged('qq98', registry, paths)).not.toContain('- insert:')
+    // Without paths (pure mode) only skin.json flags count — qq98 is not flagged.
+    expect(renderManaged('qq98', registry)).toContain('- insert:')
   })
 })
 
@@ -292,6 +328,48 @@ describe('useSkin / currentSkin against a throwaway HOME', () => {
       Object.defineProperty(process, 'platform', platformDesc)
       mock.mockReset()
     }
+  })
+
+  it('useSkin treats a profile-bundle-wired skin as wired (BOM-tolerant manifest read, no duplicate insert)', () => {
+    const h = fakeHome()
+    const registry = loadRegistry()
+    const qq98 = registry.qq98
+    const installed = join(resolvePaths(h).profileModulesDir, qq98.pkg)
+    makeSkinPackage(installed, qq98)
+    const fakeRegistry: Record<string, SkinSwitchEntry> = {
+      ...registry,
+      qq98: { ...qq98, dir: installed },
+    }
+    // Profile manifest WITH a UTF-8 BOM, listing the skin as a bundle.
+    const profileDir = join(h, '.dsh', 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), '\uFEFF' + JSON.stringify({
+      dsh: { profile: { bundles: [qq98.pkg] } },
+    }))
+    writeFileSync(patchPath(h), '')
+    expect(() => useSkin('qq98', { home: h, registry: fakeRegistry })).not.toThrow()
+    expect(readFileSync(patchPath(h), 'utf8')).not.toContain('- insert:')
+  })
+
+  it('useSkin fails loud instead of writing a duplicate insert when the bundle patch already provides the id (duplicate-entry incident)', () => {
+    const h = fakeHome()
+    const registry = loadRegistry()
+    const qq98 = registry.qq98
+    // The profile bundle layout: the skin package is physically installed under
+    // the profile node_modules and carries its own cordis.patch.yml insert row,
+    // while the manifest does NOT list it — wiring detection says non-wired,
+    // so an insert row is about to be written. The guard must inspect the
+    // bundle patch and refuse, leaving the boot patch untouched.
+    const installed = join(resolvePaths(h).profileModulesDir, qq98.pkg)
+    makeSkinPackage(installed, qq98)
+    writeFileSync(join(installed, 'cordis.patch.yml'), `- insert:\n    - id: ${qq98.id}\n      name: '${qq98.pkg}'\n`)
+    const fakeRegistry: Record<string, SkinSwitchEntry> = {
+      ...registry,
+      qq98: { ...qq98, dir: installed },
+    }
+    writeFileSync(patchPath(h), '')
+    expect(() => useSkin('qq98', { home: h, registry: fakeRegistry })).toThrow(/duplicate loader entry id/)
+    expect(readFileSync(patchPath(h), 'utf8')).not.toContain('- insert:')
   })
 })
 

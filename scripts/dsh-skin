@@ -68,7 +68,8 @@ function profileManifestPath() {
  */
 function bundleWiredFromProfile() {
   try {
-    const manifest = JSON.parse(fs.readFileSync(profileManifestPath(), 'utf8'))
+    const raw = fs.readFileSync(profileManifestPath(), 'utf8')
+    const manifest = JSON.parse(raw.replace(/^\uFEFF/, ''))
     const bundles = manifest.dsh?.profile?.bundles ?? []
     return new Set(
       Object.entries(SKINS)
@@ -184,17 +185,54 @@ function ensureSymlink(name) {
       throw new Error(`${target} exists and is not a symlink — refusing to touch it`)
     }
     const cur = fs.readlinkSync(target)
-    if (cur === dir) return false
+    // Normalize both sides: junctions read back a fully backslash path while
+    // `dir` is built with mixed separators; path.resolve makes the idempotent
+    // check stable across link kinds.
+    if (path.resolve(cur) === path.resolve(dir)) return false
     fs.unlinkSync(target)
   }
   // The link's parent scoped dir may not exist on a fresh machine (the
   // profiles/node_modules/@deepseek-ai tree is created incrementally).
   fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.symlinkSync(dir, target)
+  try {
+    fs.symlinkSync(dir, target)
+  } catch (error) {
+    // Windows: a directory symlink needs Developer Mode or an elevated
+    // process (EPERM without them). Junctions need no privilege, behave
+    // identically for a directory target (lstat/readlink/unlink/resolve all
+    // match — isSymbolicLink() is true), and are what the profile tree
+    // already uses. Fall back only on the privilege-class errors so
+    // Developer-Mode machines keep real symlinks.
+    if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'ENOSYS', 'EINVAL'].includes(error.code)) throw error
+    // A failed dir-symlink attempt may leave a partial reparse point; clear
+    // it before the junction retry so the retry never collides with a stub.
+    try { fs.unlinkSync(target) } catch { /* absent */ }
+    fs.symlinkSync(dir, target, 'junction')
+  }
   return true
 }
 
 // --- commands ------------------------------------------------------------------
+
+/**
+ * Fail-loud duplicate guard: when the profile bundle layer already provides
+ * this skin's insert row (the bundle's own cordis.patch.yml installed under
+ * the profile node_modules), the managed section must not insert the same id
+ * again — the boot dies with `duplicate loader entry id`. The bundle patch is
+ * inspected directly, so the guard holds even when manifest-based wiring
+ * detection misreads (e.g. a UTF-8 BOM breaks bundleWiredFromProfile, the
+ * duplicate-entry incident). Exits instead of writing a boot-breaking patch.
+ * @param name - the skin being switched to.
+ */
+function assertNoDuplicateInsert(name) {
+  const { pkg, id } = SKINS[name]
+  const bundlePatch = `${PROFILE_MODULES}/${pkg}/cordis.patch.yml`
+  let text = ''
+  try { text = fs.readFileSync(bundlePatch, 'utf8') } catch { return }
+  if (!text.includes('- insert:') || !text.includes(`- id: ${id}`)) return
+  console.error(`${name}: ${pkg}/cordis.patch.yml 已提供 id ${id}，managed 区不得再插入，否则启动报 duplicate loader entry id。若本皮肤应作为普通皮肤使用，请先从 profile 的 dsh.profile.bundles 移除；若 profile manifest 带 UTF-8 BOM 导致误判，请去除 BOM 后重试。`)
+  process.exit(1)
+}
 
 function cmdUse(name) {
   const official = name === 'official'
@@ -206,6 +244,10 @@ function cmdUse(name) {
     const linked = ensureSymlink(name)
     if (linked) console.log(`linked ${SKINS[name].pkg} -> ${SKINS[name].dir}`)
     checkInstalled(name)
+    // Duplicate-entry guard: only relevant when wiring detection says the
+    // skin is NOT bundle-wired — in that case an insert row is about to be
+    // written, so verify the bundle patch really does not provide the id.
+    if (!new Set([...BUNDLE_WIRED, ...bundleWiredFromProfile()]).has(name)) assertNoDuplicateInsert(name)
   }
 
   const patch = stripLegacySkinRows(stripManaged(readPatch()))
@@ -231,7 +273,7 @@ function cmdList() {
     let linkState = 'no symlink'
     try {
       const cur = fs.readlinkSync(target)
-      linkState = cur === dir ? 'linked' : `links elsewhere: ${cur}`
+      linkState = path.resolve(cur) === path.resolve(dir) ? 'linked' : `links elsewhere: ${cur}`
     } catch { /* absent */ }
     console.log(`${name.padEnd(13)} ${active === name ? '[ACTIVE] ' : '        '}${pkg}  (${linkState})`)
     if (active === name) checkInstalled(name)

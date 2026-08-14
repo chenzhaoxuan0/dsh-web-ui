@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -112,6 +112,63 @@ test('use <name> still writes an insert row for a non-wired skin', () => {
       encoding: 'utf8',
     })
     assert.equal(current.trim(), 'qq98')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test("use <name> skips the insert row when a BOM-bearing profile manifest bundles the skin (duplicate-entry incident)", () => {
+  const home = fakeHome()
+  try {
+    const repo = join(home, 'code', 'dsh-web-ui')
+    mkdirSync(join(repo, 'packages', 'skins', 'qq98'), { recursive: true })
+    // The profile manifest carries a UTF-8 BOM (as emitted by some tools) and
+    // lists the skin as a bundle: the managed section must not re-insert it.
+    const profileDir = join(home, '.dsh', 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), '\uFEFF' + JSON.stringify({
+      dsh: { profile: { bundles: [SKINS.qq98.pkg] } },
+    }))
+    const patch = patchPath(home)
+    writeFileSync(patch, '')
+    execFileSync(process.execPath, [SCRIPT, 'use', 'qq98'], {
+      env: { ...process.env, DSH_HOME: join(home, '.dsh'), DSH_SKIN_REPO: repo },
+    })
+    const after = readFileSync(patch, 'utf8')
+    assert.ok(!after.includes('- insert:'), 'a bundle-wired skin must not get a second insert row')
+    // The skin is still the active one (wired, not disabled).
+    const current = execFileSync(process.execPath, [SCRIPT, 'current'], {
+      env: { ...process.env, DSH_HOME: join(home, '.dsh'), DSH_SKIN_REPO: repo },
+      encoding: 'utf8',
+    })
+    assert.equal(current.trim(), 'qq98')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('use <name> fails loud instead of writing a duplicate insert when the bundle patch already provides the id', () => {
+  const home = fakeHome()
+  try {
+    const repo = join(home, 'code', 'dsh-web-ui')
+    const skinDir = join(repo, 'packages', 'skins', 'qq98')
+    mkdirSync(skinDir, { recursive: true })
+    // The profile bundle layer already provides the insert row via its own
+    // cordis.patch.yml; the profile manifest does NOT list the skin, so wiring
+    // detection says non-wired and an insert is about to be written. The guard
+    // must inspect the bundle patch and stop the write.
+    writeFileSync(join(skinDir, 'cordis.patch.yml'), `- insert:\n    - id: ${SKINS.qq98.id}\n      name: '${SKINS.qq98.pkg}'\n`)
+    const bundleLink = join(home, '.dsh', 'profiles', 'node_modules', '@linxin666', SKINS.qq98.pkg)
+    mkdirSync(join(bundleLink, '..'), { recursive: true })
+    symlinkSync(skinDir, bundleLink, process.platform === 'win32' ? 'junction' : 'dir')
+    const patch = patchPath(home)
+    writeFileSync(patch, '')
+    assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'use', 'qq98'], {
+      env: { ...process.env, DSH_HOME: join(home, '.dsh'), DSH_SKIN_REPO: repo },
+      stdio: 'pipe',
+    }), /duplicate loader entry id/)
+    const after = readFileSync(patch, 'utf8')
+    assert.ok(!after.includes('- insert:'), 'no insert row may be written when the guard fires')
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
