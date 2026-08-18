@@ -13,8 +13,7 @@
     "test:scripts": "node --test scripts/*.test.mjs",
     "skin:new": "node scripts/dsh-skin-new",
     "gallery:build": "node scripts/gallery-build",
-    "gallery:capture": "node scripts/capture-previews",
-    "deploy:gallery": "node scripts/deploy-gallery"
+    "gallery:capture": "node scripts/capture-previews"
   },
   "devDependencies": {
     "lightningcss": "^1.32.0",
